@@ -1,0 +1,1391 @@
+% setwd("C:/Users/smc77/Documents/Programming/RFinance/Hull/")
+
+\documentclass[10pt]{report} %{scrartcl} %amsart} % article Default font size
+% is 12pt, it can be changed here
+%\documentclass{tufte-handout}
+
+\usepackage{geometry} % Required to change the page size to A4
+\geometry{a4paper} % Set the page size to be A4 as opposed to the default US Letter
+
+%\usepackage{float} % Allows putting an [H] in \begin{figure} to specify the exact location of the figure
+\usepackage{wrapfig} % Allows in-line images such as the example fish picture
+\usepackage{amsmath} 
+\usepackage{listings}
+
+%\usepackage{lipsum} % Used for inserting dummy 'Lorem ipsum' text into the template
+
+%\linespread{1.2} % Line spacing
+
+%\setlength\parindent{0pt} % Uncomment to remove all indentation from paragraphs
+
+%\graphicspath{{./Pictures/}} % Specifies the directory where pictures are stored
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{../Sweave}
+\usepackage{subfigure}
+%\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage{caption}
+%\usepackage{float} 
+\usepackage{attrib} 
+
+\usepackage{tikz}
+\usepackage{graphicx}
+\usetikzlibrary{shapes,backgrounds}
+\usetikzlibrary{arrows,positioning}
+\usetikzlibrary{trees}
+%\usepackage{signalflowdiagram}
+\usepackage{schemabloc}
+\usetikzlibrary{arrows,%
+                petri,%
+                topaths}%
+\usepackage{tkz-berge}
+\usepackage[position=top]{subfig}
+\usepackage{mathpazo}
+%\PreviewEnvironment{tikzpicture}
+\newcounter{row}
+\newcounter{col}
+
+\newcommand\setrow[9]{
+  \setcounter{col}{1}
+  \foreach \n in {#1, #2, #3, #4, #5, #6, #7, #8, #9} {
+    \edef\x{\value{col} - 0.5}
+    \edef\y{9.5 - \value{row}}
+    \node[anchor=center] at (\x, \y) {\n};
+    \stepcounter{col}
+  }
+  \stepcounter{row}
+}
+
+\usetikzlibrary{circuits}
+%\usetikzlibrary{automata,chains}
+
+\definecolor{mydarkblue}{HTML}{0066CC}
+\definecolor{mydarkred}{HTML}{990000}
+\definecolor{mydarkgreen}{HTML}{006600}
+\definecolor{myblue}{HTML}{336699}
+
+\SweaveOpts{engine=R,eps=FALSE,echo=TRUE,prefix.string=figures/chart, keep.source=FALSE}
+
+\title{Long-Term Greedy: An algorithmic approach to Optimal Planning, or a
+general introduction to Reinforcement Learning}
+
+\author{
+  Shane M. Conway\\
+  \texttt{shane.conway@gmail.com}
+}
+\date{\dateline{June 10, 2012}}\\
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+How can we effectively plan for long-term goals?  Many optimization problems
+require multi-step problems, where classic approaches to optimization fall
+short.
+I give a short introduction to Reinforcement Learning, including both
+discrete and continuous time, as well as finite and infinite domain problems.  I
+try to demonstrate the functioning of RL through examples.  
+\end{abstract}
+
+\newpage
+
+%\begin{titlepage}
+%
+%\newcommand{\HRule}{\rule{\linewidth}{0.5mm}} % Defines a new command for the horizontal lines, change thickness here
+%
+%\center % Center everything on the page
+%
+%\textsc{\LARGE University Name}\\[1.5cm] % Name of your university/college
+%\textsc{\Large Major Heading}\\[0.5cm] % Major heading such as course name
+%\textsc{\large Minor Heading}\\[0.5cm] % Minor heading such as course title
+%
+%\HRule \\[0.4cm]
+%{ \huge \bfseries Title}\\[0.4cm] % Title of your document
+%\HRule \\[1.5cm]
+%
+%\begin{minipage}{0.4\textwidth}
+%\begin{flushleft} \large
+%\emph{Author:}\\
+%John \textsc{Smith} % Your name
+%\end{flushleft}
+%\end{minipage}
+%~
+%\begin{minipage}{0.4\textwidth}
+%\begin{flushright} \large
+%\emph{Supervisor:} \\
+%Dr. James \textsc{Smith} % Supervisor's Name
+%\end{flushright}
+%\end{minipage}\\[4cm]
+%
+%{\large \today}\\[3cm] % Date, change the \today to a set date if you want to be precise
+%
+%%\includegraphics{Logo}\\[1cm] % Include a department/university logo - this will require the graphicx package
+%
+%\vfill % Fill the rest of the page with whitespace
+%
+%\end{titlepage}
+
+<<echo=FALSE>>=
+library(RColorBrewer)
+library(xtable)
+library(xts)
+library(RQuantLib)
+library(quantmod)
+library(PerformanceAnalytics)
+library(ggplot2)
+library(car)
+library(RJSONIO)
+library(plyr)
+library(reshape)
+
+#rm(list=ls())
+options("width"=60)  # to override Dirk's R default and so that Sweave behaves
+#options("prompt"="R> ") # cue Kleiber and Zeileis; also JSS default
+# create figures/ if not present
+if ( ! (file.exists("figures") && file.info("figures")$isdir) ) dir.create("figures")
+
+qplot.zoo <- function(x) {
+	edhec <- melt(data.frame(date=index(x), x), id="date")
+	return(qplot(date, value, data = edhec, geom = "line", group = variable, color=variable))	
+}
+
+list <- structure(NA,class="result") 
+"[<-.result" <- function(x,...,value) { 
+	args <- as.list(match.call()) 
+	args <- args[-c(1:2,length(args))] 
+	length(value) <- length(args) 
+	for(i in seq(along=args)) { 
+		a <- args[[i]] 
+		if(!missing(a)) eval.parent(substitute(a <- v,list(a=a,v=value[[i]]))) 
+	} 
+	x 
+} 
+
+@
+
+\tableofcontents
+
+\newpage
+
+\chapter{Preface: How not to be greedy and achieve your goals}
+
+\begin{quote}
+In just a few centuries, the people of Easter Island wiped out their forest,
+drove their plants and animals to extinction, and saw their complex society spiral into chaos and cannibalism. 
+\end{quote}
+
+Easter Island's isolated head statues have often posed a mystery to scientists. 
+How could a population creative enough to carve these works of art have
+completely disappeared?  
+
+The Polynesian population of Easter Island can thus be viewed as having greedily
+consumed short-term rewards without properly considering the long-term
+consequences.  
+
+http://www.hartford-hwp.com/archives/24/042.html
+
+Reinforcement learning 
+
+Given the attraction of short-term rewards, how can we instead learn to
+trade-off appropriately and achieve a long term goal?
+
+Samual's checker playing program. 
+http://webdocs.cs.ualberta.ca/~sutton/papers/sutton-88.pdf
+
+How do you become an expert at something?  In Malcolm Gladwell's
+"Outliers", we are told that a few things are crucial: luck, practice,
+and ...  He placed a great emphasis on the "10,000-hour rule".  
+
+Suppose that you
+want to learn to write, or to play the piano.
+We can picture the domineering instructor dolling our rewards and punishments in response to our performance.
+
+Most introductory overviews of machine learning focus on a divide between
+\emph{supervised} and \emph{unsupervised} learning.  These methods are typically
+mathematical and abstract.  The most common method of learning from data is
+linear regression through ordinary least squares.  
+
+Supervised learning covers
+problems where the target variable is known in the training data.  This
+covers models ranging from linear regression to neural networks.  This makes
+identifying the underlying function a simple matter of trying to fit the target
+to the features, and given enough representative data and a proper understanding
+of the state space, we should be able to fully determine the function.   
+
+Unsupervised learning covers the case when we do not know the target variable,
+and want to learn the structure of the data.  The most popular model here is
+k-means clustering.
+
+One way to think about how reinforcement learning differs from supervised
+learning is that it tends to do a better job on tasks that evolve over time.  It
+chooses an action based on the current state, with some idea of what worked
+before, rather than simply looking at all the data and trying to find the "best
+fit".
+
+Reinforcement Learning is ...
+
+\begin{quote}
+This was simply the idea of a learning system that wants something, that adapts its behavior in order to maximize a special signal from its environment. This was the idea of a "hedonistic" learning system, or, as we would say now, the idea of reinforcement learning.
+\end{quote}
+(Reinforcement Learning, Preface, http://webdocs.cs.ualberta.ca/~sutton/book/ebook/node2.html)
+
+\href{http://en.wikipedia.org/wiki/Reinforcement_learning}{Reinforcement
+Learning} is an approach to learning that attempts to maximize a cumulative
+reward based on a set of actions and states.  The techniques are very popular
+within operations research and control theory.  It does not fall under the
+traditional paradigms of supervised because correct outputs are never provided.
+But it provdes more structure to the problem than unsupervised learning.  We are
+not simply letting the data speak; we have a specific objective in mind.  
+
+There are several different methods for optimizing a reinforcement learning
+problem; I will be focusing on Dynamic Programming. 
+\href{http://en.wikipedia.org/wiki/Dynamic_programming}{Dynamic programming} (or
+DP) is a powerful optimization technique that consists of breaking a problem
+down into smaller sub-problems, where the sub-problems are <em>not
+independent</em>.  This is useful both in mathematics (especially fields like
+economics and operations research) and computer science (where the algorithm's
+complexity can be substantially improved through methods such as
+\href{http://en.wikipedia.org/wiki/Memoization}{memoization}).  In this context,
+"programming" actually means "planning", as dynamic programming consists of
+forming a table of solutions. 
+
+%<img alt="" src="http://imgs.xkcd.com/comics/travelling_salesman_problem.png" class="aligncenter" />
+
+Reinforcement learning may at first seem like an overly structured approach to
+learning from data.  It requires you to explicitly define a state, reward,
+action, value, and policy.  Wouldn't it just be easier to "let the data speak",
+as we do with something like k-means clustering?  
+
+Any model imposes a structure, whether that's clear or not.  
+
+Furthermore, different models are appropriate for different problems.  And many
+of the major successes in recent projects have employed a combination of models.
+
+
+
+
+\chapter{Introduction}
+
+Before diving into the details, I always like to put things in context.  It is
+often easier to understand something when you can compare it with things that
+you already know.  Human reason is a tool for classification.
+
+Reinforcement Learning was essentially derived independently from two different
+fields: optimal control theory and artificial intelligence.
+
+Compared to other optimization methods: 
+
+\begin{itemize}
+  \item Reinforcement learning is typically
+applied to \emph{multi-period problems}.  There should be some sequence of
+events that require decision making, and the goal is to find the optimal
+solution across the full period. By comparison, methods such convex optimization
+are limited to \emph{single-period problems}: where there are not repeated
+decisions, but one decision that seeks the best solution. 
+  \item Reinforcement learning assumes an agent that can make decisions.
+\end{itemize}
+
+\section{Optimal Control Theory}
+
+Optimal Control Theory 
+
+Control theory also introduces the idea of \emph{approximate dynamic
+programming} to deal with the confining aspects of dynamic programming.
+
+
+\section{Artificial Intelligence}
+
+The two areas of artificial intelligence that became especially popular for
+reinforcement learning was game playing and robotics.  
+
+
+\subsection{Learn by Playing: Samuel's Checkers (1959)}
+
+Game playing has long been a venue for testing artificial intelligence ideas. 
+Games typically involve a simple set of rules, but can also result in complex
+behaviors.  They require strategy and planning to achieve a long-term goal.
+
+Claude Shannon 
+
+The canonical example of learning to play games is Arthur Samuel's checker's
+algorithm from ...
+
+http://www.cs.unm.edu/~terran/downloads/classes/cs529-s11/papers/samuel_1959_B.pdf
+
+http://ccar.colorado.edu/~leben/pdf/thesis_powell.pdf
+
+Later we will look at one of the most successful game-playing programs,
+TD-Gammon (Tesauro, 1995).  
+
+\section{Overview}
+
+I will cover reinforcement learning systematically, starting with the simplest
+discrete-space model using Dynamic Programming and moving towards
+continuous-space and high-dimensional problems.
+
+Section 2 provides a genearl overview to the reinforcement learning problem. 
+Section 3 introduction the first solution method, \emph{Dynamic Programming}, a
+method used across many different fields.  Section 4 builds on this by adding
+true RL models which don't require major assumptions.  
+
+Why another book on Reinforcement Learning?  Sutton and Barto have already
+provided an incredibly good text on the subject.  I won't begin to try to 
+
+The simple truth is that I fell in love with reinforcement learning.  It is the
+most elegant and powerful method for learning that I have econountered,
+especially when combined with other existing models.
+
+I hope that this book can provide some of the excitement that I have felt while
+learning and using this incredible method over the past few years.
+
+\chapter{Reinforcement Learning}
+
+Survey paper: http://arxiv.org/pdf/cs/9605103.pdf
+
+http://cs229.stanford.edu/notes/cs229-notes12.pdf
+http://www.tu-chemnitz.de/informatik/KI/scripts/ws0910/ml09_3.pdf
+http://www.inf.ed.ac.uk/teaching/courses/rl/slides/4rllect10.pdf
+http://www.cs.colostate.edu/~anderson/cs440/index.html/doku.php?id=notes:reinflearn1
+
+Presentations:
+http://gandalf.psych.umn.edu/users/schrater/schrater_lab/courses/AI2/mdp1.pdf
+http://gandalf.psych.umn.edu/users/schrater/schrater_lab/courses/AI2/rl1.pdf
+
+
+\section{Intuition}
+
+Research into computational learning and intelligence is often inspired by
+natural processes.  Neural networks were created to reproduce the
+inner functioning of the brain.  Reinforcement learning reproduces the learning
+process of animals.  It is closely related to evolutionary learning, although we
+will contrast the two methods to understand the differences.
+
+The idea behind reinforcement learning can be found in many fields.  It is a search algorithm:
+we want to search over an environment (or state space) to maximize our expected reward.  
+
+This also follows along the concept of \emph{trial-and-error learning} from psychological learning 
+literature, also known as the \emph{Law of Effect} (as in Thorndike in 1911) (Marsland 293).  
+
+A prominant example of this
+is \href{http://en.wikipedia.org/wiki/Operant_conditioning}{Operant
+Conditioning}, as coined by B. F. Skinner in 1937.  In Operant Conditioning
+
+horndike was able to create a theory of learning based on his research with
+animals.[9] His doctoral dissertation, "Animal Intelligence: An Experimental
+Study of the Associative Processes in Animals", was the first in psychology
+where the subjects were nonhumans.[9] Thorndike was interested in whether
+animals could learn tasks through imitation or observation.[10] To test this,
+Thorndike created puzzle boxes. The puzzle boxes were approximately 20 inches
+long, 15 inches wide, and 12 inches tall.[11] Each box had a door that was
+pulled open by a weight attached to a string that ran over a pulley and was
+attached to the door.[11] The string attached to the door led to a lever or
+button inside the box.[11] When the animal pressed the bar or pulled the lever,
+the string attached to the door would cause the weight to lift and the door to
+open.[11] Thorndike's puzzle boxes were arranged so that the animal would be
+required to perform a certain response (pulling a lever or pushing a button),
+while he measured the amount of time it took them to escape.[9] Once the animal
+had performed the desired response they were allowed to escape and were also
+given a reward, usually food.[9] Thorndike primarily used cats in his puzzle
+boxes. 
+
+
+Consider the following simple example of Skinner's rat.  The rat is always in
+the same state, but can choose between two actions: lever 1 and lever 2.  Lever
+1 provides a treat as a reward, while lever 2 provides an electric shock as a
+punishment.
+
+<<>>=
+state <- 0
+action <- rnorm(1000)
+reward <- 0
+
+    
+@
+
+
+
+\section{Formal definition}
+
+\begin{quote}
+RL algorithms are methods for solving this kind of problem, that is, problems
+involving sequences of decisions in which each decision affects what
+opportunities are available later, in which the effects need not be
+deterministic, and in which there are long-term goals. RL methods are intended
+to address the kind of learning and decision making problems that people and
+animals face in their normal, everyday lives.    
+\end{quote}
+
+The basic structure of reinformcement learning can be seen as a cycle, as in figure \ref{fig:reinforcement_cycle}.  In general, 
+reinforcement learning is an iterative process where an \emph{agent} takes
+\emph{actions} in an \emph{environment} an receives a \emph{reward}.  
+
+\tikzstyle{b} = [rectangle, draw, fill=blue!20, node distance=3cm, text
+width=6em, text centered, rounded corners, minimum height=4em, thick] 
+\tikzstyle{c} = [rectangle, draw, inner sep=0.5cm, dashed]
+\tikzstyle{l} = [draw, -latex',thick]
+
+\tikzstyle{decision} = [diamond, draw, fill=blue!20,
+    text width=4.5em, text badly centered, node distance=2.5cm, inner sep=0pt]
+\tikzstyle{block} = [rectangle, draw, fill=blue!20,
+    text width=7em, text centered, rounded corners, minimum height=4em]
+\tikzstyle{system} = [rectangle, draw, fill=blue!20,
+    text width=5em, text centered, rounded corners, minimum height=4em, minimum width=15em]
+\tikzstyle{line} = [draw, very thick, color=black!50, -latex']
+\tikzstyle{cloud} = [draw, ellipse,fill=red!20, node distance=2.5cm,
+    minimum height=2em]
+\tikzset{
+    arrow/.style={->, >=latex', shorten >=1pt, very thick}
+}
+
+\begin{figure}[!hs]
+  \centering
+
+\begin{tikzpicture}[auto]
+    \node at (1, 5) [block] (processing) {Agent};
+    \node at (-3, 3) (x) {Reward};
+    \node at (3, 3) (x) {Action};
+    \node at (1, 1) [block] (planning) {Environment};
+
+    \draw [l] (processing.east) -- ++(2,0) node(lowerright){} |-
+    (planning.east); 
+    \draw [l] (planning.west) -- ++(-2,0) node(upperleft){} |-
+    (processing.west);
+\end{tikzpicture}
+
+  \caption{The reinforcement learning cycle, from agent to environment, back to agent.}
+  \label{fig:reinforcement_cycle}
+\end{figure}
+
+Based on the representation in figure \ref{fig:reinforcement_cycle}, we can
+define the basic building blocks of a reinforcement learning problem as:
+
+\begin{itemize}
+  \item $S$ is a finite set of states
+  \item $A$ is finite set of actions 
+  \item $R$ is a reward function
+\end{itemize}
+  
+IN general, we want to maximize the expected return, which can be defined as:
+
+\begin{equation}
+R(s) = r(s_0) + r_{t-2} + r_{t-3} + \cdots + r_{t-N}
+\end{equation}
+
+We want to penalize ...
+
+\begin{equation}
+R_t = r_{t-1} + \gamma r_{t-2} + \gamma^2 r_{t-3} + \cdots = \sum_{k=0}^{\infty} \gamma^k r_{t-k-1}
+\end{equation}
+
+Define a policy $\pi$
+
+We define a \emph{value function} to maximize the expected return:
+
+\begin{equation}
+V^{\pi}(s) = E[R(s_0) + \gamma R(s_1) + \gamma^2 R(s_2) + \cdots | s_0 = s, \pi]
+\end{equation}
+
+We can rewrite this as a recurrence relation, which is known as the \emph{Bellman
+Equation}:
+
+\begin{equation}
+V^{\pi}(s) = R(s) + \gamma \sum_{s' \in S} P(s') V^{\pi}(s')
+\end{equation}
+
+We can use \emph{backup diagrams} to describe the RL process.
+
+[Described on p.71 of B/S]
+
+
+\section{Markov Decision Process}
+
+A Markov Decision Process (MDP) is one of the most common methods for reinfocement learning.
+Beyond what we have already described in the prior 
+
+\begin{quote}
+Most RL research is conducted within the mathematical framework of Markov
+decision processes (MDPs). MDPs involve a decision-making agent interacting with
+its environment so as to maximize the cumulative reward it receives over time.
+The agent perceives aspects of the environment's state and selects actions. The
+agent may estimate a value function and use it to construct better and better
+decision-making policies over time.    
+\end{quote}
+http://webdocs.cs.ualberta.ca/~sutton/RL-FAQ.html
+
+The MDP is a simple case as it adheres to the \emph{markov property}, that "the
+future is independent of the past except through the present".  That is to say
+that predicting the future is only dependent on the present state, or more
+formally:
+
+\begin{equation}
+P[s_{t+1}|s_{t}] = P[s_{t+1}|1,...,s_{t}]
+\end{equation}
+
+
+Many people will be familiar with the idea of a
+\href{http://en.wikipedia.org/wiki/Markov_process}{Markov process} from
+stochastic processes.  The discrete Markov process (MP) consists of a tuple (S,
+P):
+
+\begin{itemize}
+  \item $S$ is a finite set of states. 
+  \item $P$ is a state transition probability matrix.
+\end{itemize}
+
+A common example from finance and other fields is the idea of a \emph{random
+walk} (first introduced to finance by Louis Bachelier in "The Theory of
+Speculation" in 1900).
+
+If we consider 
+
+\begin{center}
+\begin{tikzpicture}
+\node[state]                               (0) {0};
+\node[state,right=of 0]                    (1) {1};
+\node[state,right=of 1]                    (2) {2};
+\coordinate[draw=none,right=of 2]          (2-g);
+\node[state,right=of {2-g},text depth=0pt] (g) {g};
+
+\draw[
+    >=latex,
+%   every node/.style={above,midway},% either
+    auto=right,                      % or
+    loop above/.style={out=75,in=105,loop},
+    every loop,
+    ]
+     (g)   edge[loop above] node {$p_{gg}$}   (g)
+           edge             node {$p_{gg-1}$} (2-g)
+     (2-g) to               node {$p_{32}$}   (2)
+           edge[loop above] node {$p_{22}$}   (2)
+     (2)   edge             node {$p_{21}$}   (1)
+     (1)   edge[loop above] node {$p_{11}$}   (1)
+           edge             node {$p_{10}$}   (0)
+     (0)   edge[loop above] node {$p_{00}$}   (0);
+\end{tikzpicture}
+\end{center}
+
+[Show random walk as a tree]
+
+% Set the overall layout of the tree
+\tikzstyle{level 1}=[level distance=1.5cm, sibling distance=3.5cm]
+\tikzstyle{level 2}=[level distance=1.5cm, sibling distance=2cm]
+
+% Define styles for bags and leafs
+\tikzstyle{bag} = [circle, draw, text width=1.5em, fill=myblue, text=white, text
+centered] 
+\tikzstyle{end} = [circle, minimum width=3pt,fill, inner sep=0pt]
+
+% The sloped option gives rotated edge labels. Personally
+% I find sloped labels a bit difficult to read. Remove the sloped options
+% to get horizontal labels. 
+\begin{tikzpicture}[grow=south, sloped]
+\node[bag] {H}
+    child {
+        node[bag] {H}        
+            child {
+                node[end, label=south:
+                    {H}] {}
+                edge from parent
+                node[above] {$W$}
+                node[below]  {$\frac{4}{9}$}
+            }
+            child {
+                node[bag] {T}
+                child {
+                  node[end, label=south:
+                      {HHT}] {}
+                }
+                edge from parent
+                node[above] {$B$}
+                node[below]  {$\frac{5}{9}$}
+            }
+            edge from parent 
+            node[above] {$W$}
+            node[below]  {$\frac{4}{7}$}
+    }
+    child {
+        node[bag] {T}        
+        child {
+                node[end, label=south:
+                    {H}] {}
+                edge from parent
+                node[above] {$B$}
+                node[below]  {$\frac{3}{9}$}
+            }
+            child {
+                node[end, label=south:
+                    {T}] {}
+                edge from parent
+                node[above] {$W$}
+                node[below]  {$\frac{6}{9}$}
+            }
+        edge from parent         
+            node[above] {$B$}
+            node[below]  {$\frac{3}{7}$}
+    };
+\end{tikzpicture}
+
+Now we can build this chain out further and view how it evolves over time. 
+Imagine that every coin flip relates to a price moving up or down one tick.
+
+<<fig=TRUE, include=TRUE, width=8, height=4>>=
+	y1 <- cumsum(rnorm(100))
+    y2 <- cumsum(rnorm(100))
+    y3 <- cumsum(rnorm(100))
+    random.walk <- data.frame(time=1:100, y1=y1, y2=y2, y3=y3)
+    random.walk <- melt(random.walk, "time")
+    print(ggplot(random.walk, aes(x=time, y=value, group=variable, color=variable)) + geom_line() + xlab("Time") + ylab("Price"))
+@
+
+
+The discrete MDP extends the Markov process further by including the idea of a
+utility or value that should be maximized.  This consists of a tuple (S, A,
+P_{sa}, R, \gamma).
+
+\begin{itemize}
+  \item $S$ is a finite set of states
+  \item $A$ is finite set of actions 
+  \item $P$ is a state transition probability matrix
+  \item $R$ is a reward function
+  \item $\gamma$ is a discount factor
+\end{itemize}
+
+Once we have a way of characterizing the \emph{environment} $E$, we then need to
+try to find the optimal behavior:
+
+\begin{itemize}
+  \item $\pi^*(s)$ is the optimal \emph{policy}, which defines what steps to take
+  to go from state $s$ to some future state (such as a terminal state) in order
+  ot maximize the rewards.
+  \item $V^*(s)$ is the expected value for following the optimal policy $\pi^*$
+  starting in the state $s$.
+  \item $Q^*(a, s)$ is the optimal q-function which defines what happens given an
+  action $a$ in the state $s$.
+\end{itemize}
+
+Keep in mind that we are considering the \emph{expected value} ($E[V]$) for the
+given policy: this is another way of saying the average value.  
+
+http://www0.cs.ucl.ac.uk/staff/D.Silver/web/Teaching_files/MDP.pdf
+
+How can we solve an finite, discrete MDP?  
+
+
+
+\chapter{Dynamic Programming, or Intelligent Brute Force Guessing}
+
+History of dynamic programming:
+
+http://www.eng.tau.ac.il/~ami/cd/or50/1526-5463-2002-50-01-0048.pdf
+
+"The key idea of DP, and of reinforcement learning generally, is the use of
+value functions to organize and structure the search for good policies." (B/S p.89)
+
+Now that we have a conceptual understanding of how reinforcement learning works,
+we can take a look at the most common method: \emph{dynamic programming} (DP).  
+
+There are two standard methods: top down and bottom up.  
+
+Dynamic programming can be summarized as: 
+
+\begin{itemize}
+  \item Recursion
+  \item Memoization
+  \item Brute force
+\end{itemize}
+
+
+\section{Computational Design Pattern: Dependent Divide and Conquer}
+
+A quick search of CRAN (including
+\href{http://cran.r-project.org/web/views/Optimization.html}{the Optimization
+view}) will reveal that there are no dynamic programming packages available. 
+This is because dynamic programming is a \emph{design technique} rather than a
+specific algorithm; it is specifically tailored to each given problem.     
+
+From a design perspective, dynamic programming has a lot in common with
+divide-and-conquer, but is specifically designed to address problems where the
+subproblems are not independent.  A nice summary of this distinction can be
+found in
+\href{http://www.amazon.com/gp/product/0262033844/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0262033844&linkCode=as2&tag=statalgo-20"}{"Introduction
+to Algorithms"}:
+
+\begin{quote}
+Dynamic programming, like the divide-and-conquer method, solves problems by
+combining the solutions to subproblems...divide-and-conquer algorithms partition
+the problem into independent subproblems, solve the subproblems recursively, and
+then combine their solutions to solve the original problem. In contrast, dynamic
+programming is applicable when the subproblems are not independent, that is,
+when subproblems share subsubproblems. In this context, a divide-and-conquer
+algorithm does more work than necessary, repeatedly solving the common
+subsubproblems. A dynamic-programming algorithm solves every subsubproblem just
+once and then saves its answer in a table, thereby avoiding the work of
+recomputing the answer every time the subsubproblem is encountered.          
+\end{quote}
+
+
+\subsection{Example: Fibonacci Series}
+
+The \href{http://en.wikipedia.org/wiki/Fibonacci_number}{Fibonacci Sequence}
+is one of the most popular introductory examples used in teaching programming.  This
+entails a function where the output is simply the sum of the preceding two
+values:     
+
+\begin{equation}
+F_n = F_{n-1} + F_{n-2}
+\end{equation}
+
+Which results in a sequence that looks like:
+
+\begin{equation}
+0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...
+\end{equation}
+
+A classic approach to solve this problem is to use recursion:
+
+<<>>=
+fib1 <- function(n) {
+  if(n == 0) return(0)
+  else if(n == 1) return(1)
+  else {
+    return(fib1(n-1) + fib1(n-2))
+  }
+}
+@
+
+I have included a print statement at the top of the function so that it's easy
+to see how this function is called.  Unfortunately, the
+\href{"http://stackoverflow.com/questions/360748/computational-complexity-of-fibonacci-sequence"}{computational
+complexity of this algorithm is exponential}.  As an example, for
+<code>fib(5)</code>, we end up calling <code>fib(2)</code> three times.
+
+The dynamic programming solution calls each value \emph{once} and stores the
+values (\href{"http://en.wikipedia.org/wiki/Memoization"}{memoization}, also
+see <a href="http://cran.r-project.org/web/packages/memoise/index.html">Hadley
+Wickham's memoise package for R</a>).  This might seem overly simplistic when
+you consider the recursive algorithm, but in this case we need to loop and
+maintain state, which is a very imperative approach.     
+
+<<>>=
+fib2 <- function(n) {
+  fibs <- c(0, 1)
+  if(n > 1) {
+    for (i in 3:n) {
+      fibs[i] = fibs[i - 1] + fibs[i - 2]
+    }
+  }
+  return(fibs[n])
+}
+@
+
+This second algorithm is linear time complexity, and its performance is noticeably better even on small values for n.
+
+<<>>=
+library(rbenchmark)
+benchmark(fib1(10))
+benchmark(fib2(10))
+@
+
+This demonstrates both the performance improvement that is possible, and also the dependence structure that is common in dynamic programming applications: the state of each subsequent value depends on prior states.
+
+This also demonstrates another important characteristic of dynamic programming: <i>the trade-off between space and time</i>.
+
+
+\section{Mathematical Formalism: Bellman's Principle of Optimality}
+
+As ... explain:
+
+\begin{quote}
+Dynamic programming is typically applied to optimization problems. In such
+problems there can be many possible solutions. Each solution has a value, and we
+wish to find a solution with the optimal (minimum or maximum) value. We call
+such a solution an optimal solution to the problem, as opposed to the optimal
+solution, since there may be several solutions that achieve the optimal value.     
+\end{quote}
+
+Dynamic programming may be necessary when a static optimization isn't possible. 
+This regularly occurs in economics and finance; an early example of its
+application can be found in <a
+href="http://pages.stern.nyu.edu/~eelton/papers/71-may.pdf">Elton and Gruber
+(1971) "Dynamic Programming Applications in Finance"</a>.  While DP is more
+general than a static approach, it can also suffer from the curse of
+dimensionality.      
+
+http://ocw.mit.edu/courses/sloan-school-of-management/15-450-analytics-of-finance-fall-2010/lecture-notes/MIT15_450F10_lec05.pdf
+
+The key to understanding how dynamic programming can lead to optimal solutions in markov decision process with dependent steps is the concept of <a href="http://en.wikipedia.org/wiki/Bellman_equation"><strong>Bellman Optimality</strong></a>.  This is named after <a href="http://en.wikipedia.org/wiki/Richard_Bellman">Richard Bellman</a>, who invented dynamic programming and wrote a definitive text on the subject "Dynamic Programming" (1957) (see <a href="http://www.ingre.unimore.it/or/corsi/vecchi_corsi/complementiro/materialedidattico/originidp.pdf">"Richard Bellman on the Birth of Dynamic Programming"</a> for more detail).
+
+\begin{quote}
+Principle of Optimality: An optimal policy has the property that whatever the
+initial state and initial decision are, the remaining decisions must constitute
+an optimal policy with regard to the state resulting from the first decision.
+(from Bellman, 1957, Chap. III.3.)    
+\end{quote}
+
+\begin{equation}
+V(x) = \max_{a \in \Gamma (x) } \{ F(x,a) + \beta V(T(x,a)) \}.
+\end{equation}
+
+
+
+\subsection{Example: 0/1 Knapsack Problem}
+
+How can we use this for optimization?  The <a href="http://en.wikipedia.org/wiki/Knapsack_problem">knapsack problem</a> is a very well known example of dynamic programming that addresses this question.  This is a resource allocation problem.  We're given a set of items with a weight and a value.  And we have a limited capacity to carry these items, so we want to maximize the value given the constraint.  This is sometimes described as a story: a thief enters a house and wants to steal as many valuable items as possible but can only carry so much weight.
+
+<img alt="" src="http://imgs.xkcd.com/comics/np_complete.png" class="aligncenter"/>
+
+Presented with this problem, we can think of several different approaches.  We might start with a <i>greedy</i> strategy: rank all the items by value, and add them to the knapsack until we can't fit any more.  This won't find the optimal solution, because there will likely be a combination of items each of which is less valuable, but whose combined value will be greater.  Alternatively, we might simply iterate through every single combination of items, but while this finds the optimal solution, it also grows with exponential complexity as we have more items in the set.  So we can use Dynamic Programming:
+
+Define a set $S$ of [latex]n[/latex] items each with a value and weight [latex]v_i, w_i[/latex] respectively.  We want to solve for:
+
+\begin{equation}
+maximize \sum^n_{i=0} v_i
+\end{equation}
+
+Subject to:
+
+\begin{equation}
+\displaystyle\sum^n_{i=0} w_i \le W
+\end{equation}
+
+The dynamic programming solution follows these steps:
+
+\begin{enumerate}
+	\item Characterize the structure of an optimal solution.
+	\item Recursively define the optimal solution to subproblems.
+	\item Step backwards and find the global optimal value.
+\end{enumerate}
+
+<<>>=
+knapsack <- function(w, v, W) {
+  
+  A <- matrix(rep(0, (W + 1) * (length(w) + 1)), ncol=W+1)
+  for (j in 1:length(w)) {
+    for (Y in 1:W) {
+      if (w[j] > Y)
+        A[j+1, Y+1] = A[j, Y+1]
+      else
+        A[j+1, Y+1] = max( A[j, Y+1], v[j] + A[j, Y- w[j]+1])
+    }
+  }
+
+  return(A)
+}
+
+optimal.weights <- function(w, W, A) {
+
+  amount = rep(0, length(w))
+  a = A[nrow(A), ncol(A)]
+  j = length(w)
+  Y = W
+   
+  while(a > 0) {
+    while(A[j+1,Y+1] == a) {
+      j = j - 1
+    }
+    j = j + 1
+    amount[j] = 1
+    Y = Y - w[j]
+    j = j - 1;
+    a = A[j+1,Y+1];
+  }
+
+  return(amount)
+}
+@
+
+We can test this on a simple example of 7 items with different weights an values:
+
+<<>>=
+w = c(1, 1, 1, 1, 2, 2, 3)
+v = c(1, 1, 2, 3, 1, 3, 5)
+W = 7
+
+A <- knapsack(w, v, W)
+best.value <- A[nrow(A), ncol(A)]
+weights <- optimal.weights(w, W, A)
+@
+
+We can look at the matrix A to see how dynamic program stores values in a table rather than recomputing the values repeatedly:
+
+<<>>=
+A
+@
+
+Where the best total value when satisfying the weight constraint in the example.
+
+There are many examples of <a href="http://rosettacode.org/wiki/Knapsack_problem/0-1">solutions to the knapsack problem on Rosetta Code</a>.  I should also point out that <a href="https://sites.google.com/site/mikescoderama/Home/0-1-knapsack-problem-in-p">"Mike's Coderama" has a post covering this in Python</a>.
+
+Now that we have built up an understanding of how dynamic programming can solve
+sequential problems by breaking the problem into smaller parts, we can look at
+the first solution for a discrete MDP.
+
+"We can easily obtain optimal policies once we have found the optimal value
+functions, V* or Q*, which solve the Bellman optimality equations:
+
+\section{Value Iteration}
+
+
+
+Value iteration
+
+Pseudocode from http://arxiv.org/pdf/cs/9605103.pdf
+
+\begin{lstlisting}[mathescape]
+initialize $V(s)$ arbitrarily
+loop until policy good enough
+  loop for s $\in$ S
+    loop for a $\in$ A
+      $Q(s; a) := R(s; a) + \gamma \sum_{s' \in S} T(s; a; s') V(s')$
+    $V(s) := max_a Q(s; a)$
+  end loop
+end loop
+\end{lstlisting}
+
+<<>>=
+actions <- c("N", "S", "E", "W")
+
+x <- 1:4
+y <- 1:3
+
+rewards <- matrix(rep(0, 12), nrow=3)
+rewards[2, 2] <- NA
+rewards[1, 4] <- 1
+rewards[2, 4] <- -1
+
+values <- rewards
+
+states <- expand.grid(x=x, y=y)
+
+transition <- list("N" = c("N" = 0.8, "S" = 0, "E" = 0.1, "W" = 0.1), 
+        "S"= c("S" = 0.8, "N" = 0, "E" = 0.1, "W" = 0.1),
+        "E"= c("E" = 0.8, "W" = 0, "S" = 0.1, "N" = 0.1),
+        "W"= c("W" = 0.8, "E" = 0, "S" = 0.1, "N" = 0.1))
+
+action.values <- list("N" = c("x" = 0, "y" = 1), 
+        "S" = c("x" = 0, "y" = -1),
+        "E" = c("x" = -1, "y" = 0),
+        "W" = c("x" = 1, "y" = 0))
+
+act <- function(action, state) {
+    action.value <- action.values[[action]]
+    new.state <- state
+    #
+    if(state["x"] == 4 && state["y"] == 1 || (state["x"] == 4 && state["y"] == 2))
+        return(state)
+    #
+    new.x = state["x"] + action.value["x"]
+    new.y = state["y"] + action.value["y"]
+    # Constrained by edge of grid
+    new.state["x"] <- min(x[length(x)], max(x[1], new.x))
+    new.state["y"] <- min(y[length(y)], max(y[1], new.y))
+    #
+    if(is.na(rewards[new.state["y"], new.state["x"]]))
+        new.state <- state
+    #
+    return(new.state)
+}
+
+bellman.update <- function(action, state, values, gamma=1) {
+    state.transition.prob <- transition[[action]]
+    q <- rep(0, length(state.transition.prob))
+    for(i in 1:length(state.transition.prob)) {        
+        new.state <- act(names(state.transition.prob)[i], state) 
+        q[i] <- (state.transition.prob[i] * (rewards[state["y"], state["x"]] + (gamma * values[new.state["y"], new.state["x"]])))
+    }
+    sum(q)
+}
+
+value.iteration <- function(states, actions, rewards, values, gamma, niter) {
+    for (j in 1:niter) {
+        for (i in 1:nrow(states)) {
+            state <- unlist(states[i,])
+            if(i %in% c(4, 8)) next # terminal states
+            q.values <- as.numeric(lapply(actions, bellman.update, state=state, values=values, gamma=gamma))
+            values[state["y"], state["x"]] <- max(q.values)
+        }
+    }
+    return(values)
+}
+
+final.values <- value.iteration(states=states, actions=actions, rewards=rewards, values=values, gamma=0.99, niter=100)
+
+@
+
+
+
+Here we can think about how the value function $V^{\pi}$ relates to the
+q-function $Q^{\pi}(s, a)$?  
+
+\tikzset{
+  treenode/.style = {align=center, inner sep=0pt, text centered,
+    font=\sffamily},
+  arn_n/.style = {treenode, circle, white, font=\sffamily\bfseries, draw=black,
+    fill=black, text width=1.5em},% arbre rouge noir, noeud noir
+  arn_r/.style = {treenode, circle, red, draw=red, 
+    text width=1.5em, very thick},% arbre rouge noir, noeud rouge
+  arn_x/.style = {treenode, rectangle, draw=black,
+    minimum width=0.5em, minimum height=0.5em}% arbre rouge noir, nil
+}
+
+
+\begin{tikzpicture}[->,>=stealth',level/.style={sibling distance = 5cm/#1,
+  level distance = 1.5cm}] 
+\node [arn_n] {33}
+    child{ node [arn_r] {15} 
+            child{ node [arn_n] {10} 
+            	child{ node [arn_r] {5} edge from parent node[above left]
+                         {$x$}} %for a named pointer
+							child{ node [arn_x] {}}
+            }
+            child{ node [arn_n] {20}
+							child{ node [arn_r] {18}}
+							child{ node [arn_x] {}}
+            }                            
+    }
+    child{ node [arn_r] {47}
+            child{ node [arn_n] {38} 
+							child{ node [arn_r] {36}}
+							child{ node [arn_r] {39}}
+            }
+            child{ node [arn_n] {51}
+							child{ node [arn_r] {49}}
+							child{ node [arn_x] {}}
+            }
+		}
+; 
+\end{tikzpicture}
+
+
+\subsection{Example: Grid World}
+
+"Grid World" is a canonical example in reinforcement learning.  Consider a robot
+that is trying to navigate a maze. This example is from Sutton and Barto,
+although similar examples can be found in "Artificial Intelligence", Tom
+Mitchel, ...  
+
+
+\begin{figure}
+  \centering
+\begin{tikzpicture}[scale=4]
+\draw[step=0.5cm,color=black] (-1,-0.5) grid (1,1);
+\node at (-0.75,+0.75) (8) {};
+\node at (-0.25,+0.75) (9) {};
+\node at (+0.25,+0.75) (10) {};
+\node[fill=mydarkgreen, minimum size=2cm, text=white] at (+0.75,+0.75) (11)
+{+1}; 
+\node at (-0.75,+0.25) (5) {};
+\node[fill=mydarkblue, minimum size=2cm] at (-0.25,+0.25) {};
+\node at (+0.25,+0.25) (6) {};
+\node[fill=mydarkred, minimum size=2cm, text=white] at (+0.75,+0.25) (7) {-1};
+\node at (-0.75,-0.25) (1) {};
+\node at (-0.25,-0.25) (2) {};
+\node at (+0.25,-0.25) (3) {};
+\node at (+0.75,-0.25) (4) {};
+
+\path[->] (1) edge (2);  
+
+\end{tikzpicture}
+  \caption[Grid World example.]
+   {Grid World example.}
+\end{figure}
+
+Suppose that a robot can move north, south, east, or west with equal probablity
+initially.  How can it find the optimal policy to the safe zone.  
+
+\section{Policy Iteration}
+
+Policy iteration is a method for finding an optimal policy by iteratively
+computing the values for a policy through \emph{policy evaluation} and
+then improving the policy through \emph{policy improvement}.
+
+\begin{equation}
+\pi_0 \rightarrow V^{\pi_0} \rightarrow \pi_1 \rightarrow V^{\pi_1}
+\end{equation}
+
+Pseudo code (from Sutton and Barto, 92):
+
+http://www.ics.uci.edu/~csp/r42a-mdp_report.pdf
+
+1. Initialization
+
+\begin{equation}
+V(s) \in \mathbb{R}
+\end{equation}
+
+\begin{lstlisting}[mathescape]
+choose an arbitrary policy $\pi'$
+loop
+  $\pi := \pi'$
+  compute the value function of policy $\pi$:
+    solve the linear equations
+      $V_{\pi}(s) := R(s; \pi(s)) + \gamma \sum_{s' \in S} T(s; \pi(s); s') V_{\pi}(s')$
+  improve the policy at each state:
+     $\pi'(s)$
+until $\pi = \pi'$
+\end{lstlisting}
+
+
+\chapter{Temporal Difference Methods}
+
+http://homes.cs.washington.edu/~todorov/courses/amath579/VanRoy_notes.pdf
+
+
+I will focus on \emph{temporal difference (TD)} methods.
+
+http://webdocs.cs.ualberta.ca/~sutton/papers/sutton-88.pdf
+
+We
+can consider the current state, and average across all of the actions that can
+be taken, leaving the policy to sort this out for itself (the state-value function,
+V (s)), or we can consider the current state and each possible action that can
+be taken separately, the action-value function, Q(s, a).
+
+Marsland, Stephen (2011-07-16). Machine Learning: An Algorithmic Perspective
+(Page 305). Chapman and Hall/CRC. Kindle Edition.  
+
+The Q(s, a) version looks very similar, except that we have to include the
+action information. In both cases we are using the difference between the
+current and previous estimates, which is why these methods have the name of
+temporal difference (TD) methods.
+
+Marsland, Stephen (2011-07-16). Machine Learning: An Algorithmic Perspective
+(Page 306). Chapman and Hall/CRC. Kindle Edition.  
+
+\section{Q-Learning}
+
+
+
+\section{SARSA}
+
+
+\chapter{Infinite Domains}
+
+
+\section{The Curse of Dimensionality}
+
+Given that dynamic programming is a brute force algorithm, it is fundamentally
+prone to suffer from the \emph{curse of dimensionality}.  
+
+
+
+\chapter{Continuous Time}
+
+Thus far we have only considered discrete time processes.
+
+
+\chapter{Applications}
+
+
+\section{Example: Shortest Path}
+
+The \href{http://en.wikipedia.org/wiki/Travelling_salesman_problem}{Traveling
+Salesman Problem (TSP)} is one of the most famous problems in theoretical
+computer science. 
+
+\begin{tikzpicture}[>=stealth',shorten >=1pt,node distance=3cm,on grid,initial/.style    ={}]
+  \node[state]          (P)                        {$P$};
+  \node[state]          (B) [above right =of P]    {$B$};
+  \node[state]          (M) [below right =of P]    {$M$};
+  \node[state]          (D) [above right =of B]    {$D$};
+  \node[state]          (C) [below right =of B]    {$C$};
+  \node[state]          (L) [below right =of C]    {$L$};
+\tikzset{mystyle/.style={->,double=orange}} 
+\tikzset{every node/.style={fill=white}} 
+\path (C)     edge [mystyle]    node   {$3$} (B)
+      (D)     edge [mystyle]    node   {$10$} (B) 
+      (L)     edge [mystyle]    node   {$10$} (M)
+      (B)     edge [mystyle]    node   {$10$} (P);
+\tikzset{mystyle/.style={<->,double=orange}}   
+\path (P)     edge [mystyle]   node   {$4$} (M)
+      (C)     edge [mystyle]   node   {$9$} (M) 
+      (C)     edge [mystyle]   node   {$4$} (D)
+      (B)     edge [mystyle]   node   {$5$} (M);
+\tikzset{mystyle/.style={<->,relative=false,in=0,out=60,double=orange}}
+\path (L)     edge [mystyle]   node   {$10$} (D); 
+\end{tikzpicture}
+
+
+\section{Example: Soduku}
+
+Learning to play a game is one of the most straight-forward ways to think about
+RL.  
+
+\begin{tikzpicture}[scale=.5]
+
+  \begin{scope}
+    \draw (0, 0) grid (9, 9);
+    \draw[very thick, scale=3] (0, 0) grid (3, 3);
+
+    \setcounter{row}{1}
+    \setrow { }{2}{ }  {5}{ }{1}  { }{9}{ }
+    \setrow {8}{ }{ }  {2}{ }{3}  { }{ }{6}
+    \setrow { }{3}{ }  { }{6}{ }  { }{7}{ }
+
+    \setrow { }{ }{1}  { }{ }{ }  {6}{ }{ }
+    \setrow {5}{4}{ }  { }{ }{ }  { }{1}{9}
+    \setrow { }{ }{2}  { }{ }{ }  {7}{ }{ }
+
+    \setrow { }{9}{ }  { }{3}{ }  { }{8}{ }
+    \setrow {2}{ }{ }  {8}{ }{4}  { }{ }{7}
+    \setrow { }{1}{ }  {9}{ }{7}  { }{6}{ }
+
+    \node[anchor=center] at (4.5, -0.5) {Unsolved Sudoku};
+  \end{scope}
+
+  \begin{scope}[xshift=12cm]
+    \draw (0, 0) grid (9, 9);
+    \draw[very thick, scale=3] (0, 0) grid (3, 3);
+
+    \setcounter{row}{1}
+    \setrow { }{2}{ }  {5}{ }{1}  { }{9}{ }
+    \setrow {8}{ }{ }  {2}{ }{3}  { }{ }{6}
+    \setrow { }{3}{ }  { }{6}{ }  { }{7}{ }
+
+    \setrow { }{ }{1}  { }{ }{ }  {6}{ }{ }
+    \setrow {5}{4}{ }  { }{ }{ }  { }{1}{9}
+    \setrow { }{ }{2}  { }{ }{ }  {7}{ }{ }
+
+    \setrow { }{9}{ }  { }{3}{ }  { }{8}{ }
+    \setrow {2}{ }{ }  {8}{ }{4}  { }{ }{7}
+    \setrow { }{1}{ }  {9}{ }{7}  { }{6}{ }
+
+    \node[anchor=center] at (4.5, -0.5) {Solved Sudoku};
+
+    \begin{scope}[blue, font=\sffamily\slshape]
+      \setcounter{row}{1}
+      \setrow {4}{ }{6}  { }{7}{ }  {3}{ }{8}
+      \setrow { }{5}{7}  { }{9}{ }  {1}{4}{ }
+      \setrow {1}{ }{9}  {4}{ }{8}  {2}{ }{5}
+
+      \setrow {9}{7}{ }  {3}{8}{5}  { }{2}{4}
+      \setrow { }{ }{3}  {7}{2}{6}  {8}{ }{ }
+      \setrow {6}{8}{ }  {1}{4}{9}  { }{5}{3}
+
+      \setrow {7}{ }{4}  {6}{ }{2}  {5}{ }{1}
+      \setrow { }{6}{5}  { }{1}{ }  {9}{3}{ }
+      \setrow {3}{ }{8}  { }{5}{ }  {4}{ }{2}
+    \end{scope}
+
+  \end{scope}
+
+\end{tikzpicture}
+
+\section{Example: TD-Gammon}
+
+\href{http://en.wikipedia.org/wiki/TD-Gammon}{TD-Gammon} remains one of the most
+famous examples of reinforcement learning.  
+
+
+\section{Example: Multi-Period Portfolio Optimization}
+
+Consider the classic mean-variance portfolio optimization as 
+
+
+\chapter{Planning and Modelling}
+
+Model vs. Table
+
+Convergence requires an infinite number of visits to each state, so an
+alternative approximation is to replace the table with a model, such as a neural
+network.
+
+http://www.bcs.rochester.edu/people/robbie/jacobslab/cheat_sheet/ModelBasedRL.pdf
+
+
+\chapter{Exploration vs. Exploitation}
+
+\section{The Multi-Armed Bandit Problem}
+
+
+\chapter{Summary}
+
+Dynamic programming is a powerful technique both for finding optimal solutions to problems where steps have dependence, and at improving algorithm performance by trading off space for time.  I will finish off this topic in the next post by looking in more detail at the topic of Bellman's Optimality Principle and at an example from economics.
+
+
+\section{Resources}
+
+I rely primarily on three sources for this analysis, all of which I highly recommend:
+
+\begin{itemize}
+	\item Mario Miranda and Paul Fackler <a href="http://www.amazon.com/gp/product/0262134209/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0262134209&linkCode=as2&tag=statalgo-20">"Applied Computational Economics and Finance"</a>.  Gives a concise overview of computational methods for solving dynamics problems in economics and finance.
+	\item Thomas Cormen, Charles Leiserson, Ronald Rivest, and Clifford Stein <a href="http://www.amazon.com/gp/product/0262033844/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0262033844&linkCode=as2&tag=statalgo-20">"Introduction to Algorithms"</a>.  This is a classic text on computer algorithms.
+	\item Richard Sutton and Andrew Barto<a href="http://www.amazon.com/gp/product/0262193981/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0262193981&linkCode=as2&tag=statalgo-20">"Reinforcement Learning: An Introduction"</a> (<a href="http://webdocs.cs.ualberta.ca/~sutton/book/ebook/the-book.html">html version available for free</a>) The most popular introductory text on the subject, lacking in some of the mathematical formalism that plagues other books on the subject.
+\end{itemize}
+
+In addition, I would point out:
+
+\begin{itemize}
+	\item <a href="http://www.amazon.com/gp/product/0691152705/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0691152705&linkCode=as2&tag=actusfideicom">"In Pursuit of the Traveling Salesman: Mathematics at the Limits of Computation"</a> is an excellent recent chronicle of the effort to solve The Traveling Salesman Problem (TSP).
+	\item Dynamic programming can suffer from the "curse of dimensionality", and methods exist such as approximate dynamic programming to address this problem: see <a href="http://www.amazon.com/gp/product/0470171553/ref=as_li_ss_tl?ie=UTF8&camp=1789&creative=390957&creativeASIN=0470171553&linkCode=as2&tag=statalgo-20">"Approximate Dynamic Programming: Solving the Curses of Dimensionality"</a> for treatment of this method.
+\end{itemize}
+
+
+\section{Further Reading}
+
+http://www.cs.cmu.edu/afs/cs/project/jair/pub/volume4/kaelbling96a-html/rl-survey.html
+http://www.cs.cmu.edu/afs/cs/project/jair/pub/volume4/kaelbling96a.pdf
+
+There are several good books on the subject:
+
+\begin{itemize}
+\item R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction} MIT Press, Cambridge, MA, USA, 1998
+\end{itemize}
+
+Reinforcement learning is also covered in chapters of:
+
+\begin{itemize}
+\item Chapter 13 of M. Marsland "Machine Learning: An Algorithmic Perspective" ...
+\item Chapter 13 of T. Mitchell \emph{"Machine Learning"} ...
+\end{itemize}
+
+
+
+
+\section{Appendix}
+
+Some useful resources:
+
+\begin{itemize}
+	\item http://www.saylor.org/site/wp-content/uploads/2011/06/Dynamic-Programming.pdf
+	\item https://researchspace.auckland.ac.nz/bitstream/handle/2292/190/230.pdf
+	\item https://stacks.stanford.edu/file/druid:zd335yg6884/YongyangCai_thesis-augmented.pdf
+	\item http://homes.cs.washington.edu/~todorov/papers/optimality_chapter.pdf
+	\item http://www.gatsby.ucl.ac.uk/~dayan/papers/dw01.pdf
+	\item http://www.cs.ubc.ca/~nando/550-2006/lectures/l3.pdf (and l2.pdf, etc.)
+	\item http://www.nbu.bg/cogs/events/2000/Readings/Petrov/rltutorial.pdf
+	\item http://www.cs.ubc.ca/~nando/550-2006/lectures/l3.pdf
+	\item http://www.cs.tcd.ie/Saturnino.Luz/t/cs7032/solvemdps-notes.pdf
+	\item http://homes.cs.washington.edu/~todorov/papers/optimality_chapter.pdf
+	\item http://neuro.bstu.by/ai/RL-3.pdf
+	\item http://www.personal.kent.edu/~rmuhamma/Algorithms/MyAlgorithms/Dynamic/knapsackdyn.htm
+\item http://artint.info/html/ArtInt_262.html
+\item Tom Mitchell:
+http://www.cs.cmu.edu/~epxing/Class/10701-10s/Lecture/MDPs_RL_04_26_2010.pdf 
+\end{itemize}
+
+http://courses.cs.washington.edu/courses/cse473/11au/
+https://github.com/sinairv/Temporal-Difference-Learning
+%
+%
+% Agent based simulation in python: http://meandering-through-mathematics.blogspot.com/2011/08/supply-demand-and-market-microstructure.html
+
+
+
+\begin{thebibliography}{99} % Bibliography - this is intentionally simple in this template
+
+\bibitem[Barto Bradtke Singh, 1995]{Barto:1995}
+Andrew G. Barto, Steven J. Bradtke, Satinder P. Singh
+\newblock Learning to act using real-time dynamic programming
+\newblock {\em Artificial Intelligence}, Volume 72, Issues 1-2, January 1995,
+Pages 81-138
+ 
+\end{thebibliography}
+
+\end{document}
+
+
+
+
