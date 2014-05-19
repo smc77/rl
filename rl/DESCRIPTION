@@ -1,0 +1,9 @@
+Package: rl
+Type: Package
+Title: Reinforcement Learning
+Version: 0.1
+Date: 2014-05-19
+Author: Shane Conway 
+Maintainer: Shane Conway <smc77@columbia.edu> 
+Description: A package to demonstrate reinforcement learning algorithms.
+License: MIT 
